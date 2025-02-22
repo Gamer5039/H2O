@@ -10,6 +10,9 @@ body {
     max-width: 800px;
     margin: 0 auto;
     padding: 20px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
 }
 
 .header {
@@ -22,8 +25,9 @@ body {
 }
 
 .header h1 {
-    color: #128C7E;
+    color: #25D366;
     margin: 0 0 15px 0;
+    font-size: 2em;
 }
 
 .status {
@@ -32,66 +36,114 @@ body {
     background-color: #DCF8C6;
     display: inline-block;
     font-weight: 500;
+    transition: all 0.3s ease;
 }
 
-.setup-container {
+.status.error {
+    background-color: #ffebee;
+    color: #c62828;
+}
+
+.qrcode-container {
+    text-align: center;
     background: white;
+    padding: 40px;
     border-radius: 10px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    padding: 20px;
     margin-bottom: 20px;
 }
 
-.setup-step {
+#qr-wrapper {
+    position: relative;
+    width: 264px;
+    height: 264px;
+    margin: 0 auto;
+    background: #f8f9fa;
+    border-radius: 10px;
     padding: 20px;
-    margin-bottom: 20px;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    background-color: #fff;
 }
 
-.setup-step:last-child {
-    margin-bottom: 0;
+#qrcode {
+    max-width: 264px;
+    height: auto;
+    display: none;
 }
 
-.setup-step h2 {
-    color: #128C7E;
-    margin-top: 0;
-    margin-bottom: 15px;
-    font-size: 1.4em;
-}
-
-.setup-step p {
-    margin: 10px 0;
-}
-
-.setup-step ul {
-    padding-left: 20px;
-}
-
-.setup-step li {
-    margin: 10px 0;
-}
-
-code {
+.spinner {
     display: block;
+    width: 50px;
+    height: 50px;
+    border: 3px solid rgba(37, 211, 102, 0.2);
+    border-radius: 50%;
+    border-top-color: #25D366;
+    animation: spin 1s linear infinite;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    margin-top: -25px;
+    margin-left: -25px;
+}
+
+.qr-instructions {
+    color: #666;
+    margin: 20px 0;
+    font-size: 16px;
+    line-height: 1.8;
+    text-align: left;
+    max-width: 400px;
+    margin: 20px auto;
+    background: #f8f9fa;
     padding: 15px;
-    margin: 10px 0;
-    background-color: #f5f5f5;
-    border-radius: 5px;
-    font-family: monospace;
-    word-break: break-all;
-    border: 1px solid #e0e0e0;
+    border-radius: 8px;
 }
 
-a {
-    color: #128C7E;
-    text-decoration: none;
-    font-weight: 500;
+.success-container {
+    text-align: center;
+    background: white;
+    padding: 40px;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
 }
 
-a:hover {
-    text-decoration: underline;
+.success-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 20px;
+    background: #25D366;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    color: white;
+    animation: scaleIn 0.5s ease;
+}
+
+.success-container h2 {
+    color: #25D366;
+    margin-bottom: 20px;
+}
+
+.instructions {
+    list-style: none;
+    padding: 0;
+    text-align: left;
+    max-width: 400px;
+    margin: 20px auto;
+}
+
+.instructions li {
+    padding: 10px 0;
+    padding-left: 30px;
+    position: relative;
+}
+
+.instructions li:before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: #25D366;
 }
 
 .footer {
@@ -100,11 +152,27 @@ a:hover {
     background: white;
     border-radius: 10px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    margin-top: auto;
 }
 
-#status {
+#connection-status {
     font-weight: bold;
-    color: #128C7E;
+    color: #25D366;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        transform: scale(0);
+    }
+    to {
+        transform: scale(1);
+    }
 }
 
 /* Mobile Responsiveness */
@@ -113,42 +181,30 @@ a:hover {
         padding: 10px;
     }
 
+    .qrcode-container {
+        padding: 20px;
+    }
+
+    #qr-wrapper {
+        width: 200px;
+        height: 200px;
+        padding: 15px;
+    }
+
+    #qrcode {
+        max-width: 200px;
+    }
+
     .header {
         padding: 15px;
     }
 
-    .setup-step {
-        padding: 15px;
+    .success-container {
+        padding: 20px;
     }
 
     .status {
         padding: 8px 16px;
         font-size: 14px;
-    }
-
-    code {
-        padding: 10px;
-        font-size: 14px;
-    }
-}
-
-/* Animations */
-.setup-step {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.setup-step:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
     }
 }
