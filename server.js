@@ -1,76 +1,100 @@
 const express = require('express');
 const { chromium } = require('playwright');
 const http = require('http');
-const socketIo = require('socket.io');
+const { Server } = require('socket.io');
 const path = require('path');
 const fetch = require('node-fetch');
-const qrcode = require('qrcode');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = new Server(server, {
+    path: '/socket.io',
+    transports: ['websocket', 'polling'],
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST']
+    }
+});
 
+// Serve static files
 app.use(express.static('public'));
 app.use(express.json());
 
 let browser = null;
 let page = null;
+let isInitializing = false;
 
 async function initWhatsApp() {
+    if (isInitializing) return;
+    isInitializing = true;
+
     try {
-        // Launch browser
+        console.log('Launching browser...');
         browser = await chromium.launch({
-            args: ['--no-sandbox']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--disable-gpu'
+            ]
         });
         
-        // Create page
+        console.log('Creating new page...');
         page = await browser.newPage();
         
-        // Go to WhatsApp Web
+        console.log('Navigating to WhatsApp Web...');
         await page.goto('https://web.whatsapp.com/');
         
-        // Wait for QR code element
-        const qrElement = await page.waitForSelector('canvas');
-        const qrData = await qrElement.evaluate((el) => el.toDataURL());
+        // Wait for QR code canvas and get its data URL
+        console.log('Waiting for QR code...');
+        const qrCanvas = await page.waitForSelector('canvas');
+        const qrDataUrl = await qrCanvas.evaluate(canvas => canvas.toDataURL());
         
-        // Emit QR code to all connected clients
-        io.emit('qr', qrData);
+        console.log('Emitting QR code...');
+        io.emit('qr', qrDataUrl);
         
         // Wait for WhatsApp to be ready
+        console.log('Waiting for WhatsApp to be ready...');
         await page.waitForSelector('div[data-testid="chat-list"]');
         
-        // WhatsApp is ready
+        console.log('WhatsApp is ready!');
         io.emit('whatsappReady');
         
-        // Listen for messages
+        // Set up message monitoring
         await page.evaluate(() => {
+            window.onNewMessage = async (message) => {
+                // Send message to server
+                window.postMessage({
+                    type: 'newMessage',
+                    message: message
+                }, '*');
+            };
+
             const observer = new MutationObserver((mutations) => {
-                mutations.forEach((mutation) => {
+                for (const mutation of mutations) {
                     if (mutation.addedNodes.length) {
                         const messages = document.querySelectorAll('div[data-testid="msg-container"]');
                         const lastMessage = messages[messages.length - 1];
                         if (lastMessage) {
-                            window.postMessage({
-                                type: 'newMessage',
-                                text: lastMessage.textContent
-                            }, '*');
+                            window.onNewMessage(lastMessage.textContent);
                         }
                     }
-                });
+                }
             });
-            
+
             observer.observe(document.body, {
                 childList: true,
                 subtree: true
             });
         });
-        
-        // Handle messages
+
+        // Handle incoming messages
         page.on('domcontentloaded', async () => {
             await page.evaluate(() => {
                 window.addEventListener('message', async (event) => {
                     if (event.data.type === 'newMessage') {
-                        const message = event.data.text;
+                        const message = event.data.message;
                         if (!message.startsWith('!')) {
                             try {
                                 const apiUrl = message.startsWith('/image') 
@@ -86,11 +110,9 @@ async function initWhatsApp() {
                                 const data = await response.json();
                                 
                                 if (data.status === 'success') {
-                                    // Find and click reply button
                                     const replyButton = document.querySelector('span[data-testid="reply-button"]');
                                     if (replyButton) replyButton.click();
                                     
-                                    // Type and send message
                                     const input = document.querySelector('div[contenteditable="true"]');
                                     if (input) {
                                         input.textContent = data.text;
@@ -106,19 +128,24 @@ async function initWhatsApp() {
                 });
             });
         });
+
     } catch (error) {
         console.error('WhatsApp initialization error:', error);
-        io.emit('error', 'Failed to initialize WhatsApp');
+        io.emit('error', 'Failed to initialize WhatsApp. Please refresh the page.');
+    } finally {
+        isInitializing = false;
     }
 }
 
-// Socket.io connection handler
+// Socket.IO connection handler
 io.on('connection', (socket) => {
     console.log('Client connected');
     
-    // Initialize WhatsApp if not already initialized
-    if (!browser) {
-        initWhatsApp().catch(console.error);
+    if (!browser && !isInitializing) {
+        initWhatsApp().catch(error => {
+            console.error('Error during WhatsApp initialization:', error);
+            socket.emit('error', 'Failed to initialize WhatsApp. Please try again.');
+        });
     }
     
     socket.on('disconnect', () => {
@@ -126,10 +153,28 @@ io.on('connection', (socket) => {
     });
 });
 
+// Error handling for browser crashes
+setInterval(async () => {
+    if (browser && !page) {
+        console.log('Restarting browser due to crash...');
+        try {
+            await browser.close();
+        } catch (e) {
+            console.error('Error closing browser:', e);
+        }
+        browser = null;
+        initWhatsApp().catch(console.error);
+    }
+}, 30000);
+
 // Cleanup on server shutdown
 process.on('SIGTERM', async () => {
     if (browser) {
-        await browser.close();
+        try {
+            await browser.close();
+        } catch (e) {
+            console.error('Error closing browser:', e);
+        }
     }
     process.exit(0);
 });
