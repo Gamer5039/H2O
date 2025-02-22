@@ -3,68 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp AI Bot Setup</title>
+    <title>WhatsApp AI Bot</title>
     <link rel="stylesheet" href="style.css">
+    <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>WhatsApp AI Bot Setup</h1>
-            <div class="status">Follow the steps below to connect your WhatsApp</div>
+            <h1>WhatsApp AI Bot</h1>
+            <div id="status" class="status">Waiting for QR Code...</div>
         </div>
 
-        <div class="setup-container">
-            <div class="setup-step">
-                <h2>Step 1: Create Meta Developer Account</h2>
-                <p>1. Go to <a href="https://developers.facebook.com" target="_blank">Meta Developers</a></p>
-                <p>2. Create a new account or log in</p>
-                <p>3. Create a new app and select "Business" type</p>
+        <div id="qrcode-container" class="qrcode-container">
+            <div id="qr-wrapper">
+                <img id="qrcode" src="" alt="WhatsApp QR Code">
+                <div id="loading-spinner" class="spinner"></div>
             </div>
+            <p class="qr-instructions">
+                1. Open WhatsApp on your phone<br>
+                2. Tap Menu or Settings and select WhatsApp Web<br>
+                3. Point your phone to this screen to capture the QR code
+            </p>
+        </div>
 
-            <div class="setup-step">
-                <h2>Step 2: Set Up WhatsApp</h2>
-                <p>1. From your app dashboard, click "Add Product"</p>
-                <p>2. Select "WhatsApp" and follow the setup process</p>
-                <p>3. Get your WhatsApp Phone Number ID from the API Setup page</p>
-                <p>4. Generate a permanent access token</p>
-            </div>
-
-            <div class="setup-step">
-                <h2>Step 3: Configure Webhook</h2>
-                <p>1. In WhatsApp settings, find "Webhooks"</p>
-                <p>2. Set the Webhook URL to:</p>
-                <code id="webhookUrl">Loading...</code>
-                <p>3. Create a Verify Token and save it</p>
-                <p>4. Subscribe to "messages" webhook field</p>
-            </div>
-
-            <div class="setup-step">
-                <h2>Step 4: Set Environment Variables</h2>
-                <p>Add these variables in your Vercel project settings:</p>
-                <ul>
-                    <li>WHATSAPP_TOKEN (your access token)</li>
-                    <li>WHATSAPP_PHONE_ID (your phone number ID)</li>
-                    <li>VERIFY_TOKEN (your webhook verify token)</li>
-                </ul>
-            </div>
-
-            <div class="setup-step">
-                <h2>Step 5: Test Your Bot</h2>
-                <p>1. Send a message to your WhatsApp business number</p>
-                <p>2. The bot should respond automatically</p>
-                <p>3. Use /image command for image generation</p>
-            </div>
+        <div id="success-container" class="success-container" style="display: none;">
+            <div class="success-icon">✓</div>
+            <h2>WhatsApp Connected!</h2>
+            <p>Your AI bot is now active and will respond to messages automatically.</p>
+            <ul class="instructions">
+                <li>Send any message to start chatting with the AI</li>
+                <li>Use /image command for image generation</li>
+                <li>Keep this tab open to maintain the connection</li>
+            </ul>
         </div>
 
         <div class="footer">
-            <p>Status: <span id="status">Ready to configure</span></p>
+            <p>Status: <span id="connection-status">Initializing...</span></p>
         </div>
     </div>
 
     <script>
-        // Display the current webhook URL
-        document.getElementById('webhookUrl').textContent = 
-            `${window.location.origin}/webhook`;
+        const socket = io();
+        const status = document.getElementById('status');
+        const qrCode = document.getElementById('qrcode');
+        const spinner = document.getElementById('loading-spinner');
+        const qrContainer = document.getElementById('qrcode-container');
+        const successContainer = document.getElementById('success-container');
+        const connectionStatus = document.getElementById('connection-status');
+
+        function updateStatus(message, isError = false) {
+            status.textContent = message;
+            status.className = `status ${isError ? 'error' : ''}`;
+        }
+
+        socket.on('connect', () => {
+            connectionStatus.textContent = 'Connected to server';
+            updateStatus('Initializing WhatsApp...');
+        });
+
+        socket.on('disconnect', () => {
+            connectionStatus.textContent = 'Disconnected';
+            updateStatus('Connection lost. Please refresh the page.', true);
+            qrContainer.style.display = 'block';
+            successContainer.style.display = 'none';
+            qrCode.style.display = 'none';
+            spinner.style.display = 'block';
+        });
+
+        socket.on('qr', (qrDataURL) => {
+            updateStatus('Scan QR Code with WhatsApp');
+            qrCode.src = qrDataURL;
+            qrCode.style.display = 'block';
+            spinner.style.display = 'none';
+            qrContainer.style.display = 'block';
+            successContainer.style.display = 'none';
+        });
+
+        socket.on('whatsappReady', () => {
+            updateStatus('WhatsApp Connected Successfully!');
+            connectionStatus.textContent = 'WhatsApp Connected';
+            qrContainer.style.display = 'none';
+            successContainer.style.display = 'block';
+        });
+
+        socket.on('error', (message) => {
+            updateStatus(message, true);
+            spinner.style.display = 'none';
+        });
     </script>
 </body>
 </html>
