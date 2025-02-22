@@ -1,143 +1,90 @@
 const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const http = require('http');
-const socketIo = require('socket.io');
-const path = require('path');
 const fetch = require('node-fetch');
-const qrcode = require('qrcode');
+const http = require('http');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+
+// Your WhatsApp Business API credentials
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 
 app.use(express.static('public'));
 app.use(express.json());
 
-// Store client instance
-let whatsappClient = null;
-let isClientReady = false;
+// Webhook verification
+app.get('/webhook', (req, res) => {
+    const verify_token = process.env.VERIFY_TOKEN;
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
 
-// Serve the main page
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    if (mode && token) {
+        if (mode === 'subscribe' && token === verify_token) {
+            console.log('Webhook verified');
+            res.status(200).send(challenge);
+        } else {
+            res.sendStatus(403);
+        }
+    }
 });
 
-// Initialize WhatsApp client with session support
-function initializeWhatsAppClient() {
-    whatsappClient = new Client({
-        authStrategy: new LocalAuth(),
-        puppeteer: {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu'
-            ]
-        }
-    });
+// Receive messages
+app.post('/webhook', async (req, res) => {
+    if (req.body.object) {
+        if (req.body.entry &&
+            req.body.entry[0].changes &&
+            req.body.entry[0].changes[0] &&
+            req.body.entry[0].changes[0].value.messages &&
+            req.body.entry[0].changes[0].value.messages[0]
+        ) {
+            const phone_number_id = req.body.entry[0].changes[0].value.metadata.phone_number_id;
+            const from = req.body.entry[0].changes[0].value.messages[0].from;
+            const msg_body = req.body.entry[0].changes[0].value.messages[0].text.body;
 
-    // QR Code event
-    whatsappClient.on('qr', async (qr) => {
-        try {
-            // Generate QR code as data URL
-            const qrDataURL = await qrcode.toDataURL(qr);
-            io.emit('qr', qrDataURL);
-            console.log('QR Code generated and sent to client');
-        } catch (err) {
-            console.error('QR Code generation error:', err);
-            io.emit('error', 'Failed to generate QR code');
-        }
-    });
+            try {
+                // Get AI response
+                const apiUrl = msg_body.startsWith('/image') 
+                    ? 'https://backend.buildpicoapps.com/aero/run/image-generation-api?pk=v1-Z0FBQUFBQm5HUEtMSjJkakVjcF9IQ0M0VFhRQ0FmSnNDSHNYTlJSblE0UXo1Q3RBcjFPcl9YYy1OZUhteDZWekxHdWRLM1M1alNZTkJMWEhNOWd4S1NPSDBTWC12M0U2UGc9PQ=='
+                    : 'https://backend.buildpicoapps.com/aero/run/llm-api?pk=v1-Z0FBQUFBQm5HUEtMSjJkakVjcF9IQ0M0VFhRQ0FmSnNDSHNYTlJSblE0UXo1Q3RBcjFPcl9YYy1OZUhteDZWekxHdWRLM1M1alNZTkJMWEhNOWd4S1NPSDBTWC12M0U2UGc9PQ==';
 
-    // Ready event
-    whatsappClient.on('ready', () => {
-        console.log('WhatsApp client is ready');
-        isClientReady = true;
-        io.emit('whatsappReady');
-    });
-
-    // Authentication successful
-    whatsappClient.on('authenticated', (session) => {
-        console.log('WhatsApp authenticated');
-        io.emit('authenticated');
-    });
-
-    // Authentication failure
-    whatsappClient.on('auth_failure', (err) => {
-        console.error('WhatsApp authentication failed:', err);
-        isClientReady = false;
-        io.emit('authFailed', 'WhatsApp authentication failed');
-    });
-
-    // Disconnected
-    whatsappClient.on('disconnected', (reason) => {
-        console.log('WhatsApp disconnected:', reason);
-        isClientReady = false;
-        io.emit('disconnected', reason);
-        // Attempt to reconnect
-        initializeWhatsAppClient();
-    });
-
-    // Handle incoming messages
-    whatsappClient.on('message', async (message) => {
-        if (message.body.startsWith('!')) return;
-
-        try {
-            const apiUrl = message.body.startsWith('/image') 
-                ? 'https://backend.buildpicoapps.com/aero/run/image-generation-api?pk=v1-Z0FBQUFBQm5HUEtMSjJkakVjcF9IQ0M0VFhRQ0FmSnNDSHNYTlJSblE0UXo1Q3RBcjFPcl9YYy1OZUhteDZWekxHdWRLM1M1alNZTkJMWEhNOWd4S1NPSDBTWC12M0U2UGc9PQ=='
-                : 'https://backend.buildpicoapps.com/aero/run/llm-api?pk=v1-Z0FBQUFBQm5HUEtMSjJkakVjcF9IQ0M0VFhRQ0FmSnNDSHNYTlJSblE0UXo1Q3RBcjFPcl9YYy1OZUhteDZWekxHdWRLM1M1alNZTkJMWEhNOWd4S1NPSDBTWC12M0U2UGc9PQ==';
-
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: message.body })
-            });
-
-            const data = await response.json();
-            
-            if (data.status === 'success') {
-                await message.reply(data.text);
-                io.emit('messageSent', { 
-                    from: message.from, 
-                    message: message.body, 
-                    response: data.text 
+                const aiResponse = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: msg_body })
                 });
-            } else {
-                throw new Error('API response was not successful');
+
+                const data = await aiResponse.json();
+                
+                if (data.status === 'success') {
+                    // Send message back to WhatsApp
+                    await fetch(`https://graph.facebook.com/v17.0/${phone_number_id}/messages`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            messaging_product: "whatsapp",
+                            to: from,
+                            text: { body: data.text },
+                        }),
+                    });
+                }
+            } catch (error) {
+                console.error('Error:', error);
             }
-        } catch (error) {
-            console.error('Message handling error:', error);
-            await message.reply('Sorry, I encountered an error. Please try again.');
-            io.emit('error', 'Failed to process message');
         }
-    });
-
-    // Initialize the client
-    whatsappClient.initialize()
-        .catch(err => {
-            console.error('WhatsApp initialization error:', err);
-            io.emit('error', 'Failed to initialize WhatsApp client');
-        });
-}
-
-// WebSocket connection handler
-io.on('connection', (socket) => {
-    console.log('Web client connected');
-
-    // If WhatsApp client is already ready, notify the frontend
-    if (isClientReady) {
-        socket.emit('whatsappReady');
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(404);
     }
+});
 
-    // Initialize WhatsApp client if not already initialized
-    if (!whatsappClient) {
-        initializeWhatsAppClient();
-    }
-
-    socket.on('disconnect', () => {
-        console.log('Web client disconnected');
-    });
+// Serve setup page
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const port = process.env.PORT || 3000;
