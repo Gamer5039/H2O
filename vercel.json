@@ -3,7 +3,11 @@
   "builds": [
     {
       "src": "server.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "installCommand": "npm install && npx playwright install chromium",
+        "buildCommand": "npm run build"
+      }
     },
     {
       "src": "public/**",
@@ -12,7 +16,7 @@
   ],
   "routes": [
     {
-      "src": "/webhook",
+      "src": "/socket.io/(.*)",
       "dest": "server.js"
     },
     {
@@ -20,9 +24,10 @@
       "dest": "/public/$1"
     }
   ],
-  "env": {
-    "WHATSAPP_TOKEN": "",
-    "WHATSAPP_PHONE_ID": "",
-    "VERIFY_TOKEN": ""
+  "functions": {
+    "server.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
   }
 }
