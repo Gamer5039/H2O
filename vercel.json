@@ -3,11 +3,7 @@
   "builds": [
     {
       "src": "server.js",
-      "use": "@vercel/node",
-      "config": {
-        "installCommand": "npm install && npx playwright install chromium",
-        "buildCommand": "npm run build"
-      }
+      "use": "@vercel/node"
     },
     {
       "src": "public/**",
@@ -20,14 +16,15 @@
       "dest": "server.js"
     },
     {
-      "src": "/(.*)",
-      "dest": "/public/$1"
+      "src": "/",
+      "dest": "public/index.html"
+    },
+    {
+      "src": "/(.+)",
+      "dest": "public/$1"
     }
   ],
-  "functions": {
-    "server.js": {
-      "memory": 1024,
-      "maxDuration": 60
-    }
+  "env": {
+    "PLAYWRIGHT_BROWSERS_PATH": "/tmp/playwright"
   }
 }
