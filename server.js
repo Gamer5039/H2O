@@ -1,90 +1,137 @@
 const express = require('express');
-const fetch = require('node-fetch');
+const { chromium } = require('playwright');
 const http = require('http');
+const socketIo = require('socket.io');
 const path = require('path');
+const fetch = require('node-fetch');
+const qrcode = require('qrcode');
 
 const app = express();
 const server = http.createServer(app);
-
-// Your WhatsApp Business API credentials
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
+const io = socketIo(server);
 
 app.use(express.static('public'));
 app.use(express.json());
 
-// Webhook verification
-app.get('/webhook', (req, res) => {
-    const verify_token = process.env.VERIFY_TOKEN;
-    const mode = req.query['hub.mode'];
-    const token = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
+let browser = null;
+let page = null;
 
-    if (mode && token) {
-        if (mode === 'subscribe' && token === verify_token) {
-            console.log('Webhook verified');
-            res.status(200).send(challenge);
-        } else {
-            res.sendStatus(403);
-        }
-    }
-});
-
-// Receive messages
-app.post('/webhook', async (req, res) => {
-    if (req.body.object) {
-        if (req.body.entry &&
-            req.body.entry[0].changes &&
-            req.body.entry[0].changes[0] &&
-            req.body.entry[0].changes[0].value.messages &&
-            req.body.entry[0].changes[0].value.messages[0]
-        ) {
-            const phone_number_id = req.body.entry[0].changes[0].value.metadata.phone_number_id;
-            const from = req.body.entry[0].changes[0].value.messages[0].from;
-            const msg_body = req.body.entry[0].changes[0].value.messages[0].text.body;
-
-            try {
-                // Get AI response
-                const apiUrl = msg_body.startsWith('/image') 
-                    ? 'https://backend.buildpicoapps.com/aero/run/image-generation-api?pk=v1-Z0FBQUFBQm5HUEtMSjJkakVjcF9IQ0M0VFhRQ0FmSnNDSHNYTlJSblE0UXo1Q3RBcjFPcl9YYy1OZUhteDZWekxHdWRLM1M1alNZTkJMWEhNOWd4S1NPSDBTWC12M0U2UGc9PQ=='
-                    : 'https://backend.buildpicoapps.com/aero/run/llm-api?pk=v1-Z0FBQUFBQm5HUEtMSjJkakVjcF9IQ0M0VFhRQ0FmSnNDSHNYTlJSblE0UXo1Q3RBcjFPcl9YYy1OZUhteDZWekxHdWRLM1M1alNZTkJMWEhNOWd4S1NPSDBTWC12M0U2UGc9PQ==';
-
-                const aiResponse = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: msg_body })
+async function initWhatsApp() {
+    try {
+        // Launch browser
+        browser = await chromium.launch({
+            args: ['--no-sandbox']
+        });
+        
+        // Create page
+        page = await browser.newPage();
+        
+        // Go to WhatsApp Web
+        await page.goto('https://web.whatsapp.com/');
+        
+        // Wait for QR code element
+        const qrElement = await page.waitForSelector('canvas');
+        const qrData = await qrElement.evaluate((el) => el.toDataURL());
+        
+        // Emit QR code to all connected clients
+        io.emit('qr', qrData);
+        
+        // Wait for WhatsApp to be ready
+        await page.waitForSelector('div[data-testid="chat-list"]');
+        
+        // WhatsApp is ready
+        io.emit('whatsappReady');
+        
+        // Listen for messages
+        await page.evaluate(() => {
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.addedNodes.length) {
+                        const messages = document.querySelectorAll('div[data-testid="msg-container"]');
+                        const lastMessage = messages[messages.length - 1];
+                        if (lastMessage) {
+                            window.postMessage({
+                                type: 'newMessage',
+                                text: lastMessage.textContent
+                            }, '*');
+                        }
+                    }
                 });
+            });
+            
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        });
+        
+        // Handle messages
+        page.on('domcontentloaded', async () => {
+            await page.evaluate(() => {
+                window.addEventListener('message', async (event) => {
+                    if (event.data.type === 'newMessage') {
+                        const message = event.data.text;
+                        if (!message.startsWith('!')) {
+                            try {
+                                const apiUrl = message.startsWith('/image') 
+                                    ? 'https://backend.buildpicoapps.com/aero/run/image-generation-api?pk=v1-Z0FBQUFBQm5HUEtMSjJkakVjcF9IQ0M0VFhRQ0FmSnNDSHNYTlJSblE0UXo1Q3RBcjFPcl9YYy1OZUhteDZWekxHdWRLM1M1alNZTkJMWEhNOWd4S1NPSDBTWC12M0U2UGc9PQ=='
+                                    : 'https://backend.buildpicoapps.com/aero/run/llm-api?pk=v1-Z0FBQUFBQm5HUEtMSjJkakVjcF9IQ0M0VFhRQ0FmSnNDSHNYTlJSblE0UXo1Q3RBcjFPcl9YYy1OZUhteDZWekxHdWRLM1M1alNZTkJMWEhNOWd4S1NPSDBTWC12M0U2UGc9PQ==';
 
-                const data = await aiResponse.json();
-                
-                if (data.status === 'success') {
-                    // Send message back to WhatsApp
-                    await fetch(`https://graph.facebook.com/v17.0/${phone_number_id}/messages`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            messaging_product: "whatsapp",
-                            to: from,
-                            text: { body: data.text },
-                        }),
-                    });
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        }
-        res.sendStatus(200);
-    } else {
-        res.sendStatus(404);
+                                const response = await fetch(apiUrl, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ prompt: message })
+                                });
+
+                                const data = await response.json();
+                                
+                                if (data.status === 'success') {
+                                    // Find and click reply button
+                                    const replyButton = document.querySelector('span[data-testid="reply-button"]');
+                                    if (replyButton) replyButton.click();
+                                    
+                                    // Type and send message
+                                    const input = document.querySelector('div[contenteditable="true"]');
+                                    if (input) {
+                                        input.textContent = data.text;
+                                        const sendButton = document.querySelector('span[data-testid="send"]');
+                                        if (sendButton) sendButton.click();
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('Error handling message:', error);
+                            }
+                        }
+                    }
+                });
+            });
+        });
+    } catch (error) {
+        console.error('WhatsApp initialization error:', error);
+        io.emit('error', 'Failed to initialize WhatsApp');
     }
+}
+
+// Socket.io connection handler
+io.on('connection', (socket) => {
+    console.log('Client connected');
+    
+    // Initialize WhatsApp if not already initialized
+    if (!browser) {
+        initWhatsApp().catch(console.error);
+    }
+    
+    socket.on('disconnect', () => {
+        console.log('Client disconnected');
+    });
 });
 
-// Serve setup page
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// Cleanup on server shutdown
+process.on('SIGTERM', async () => {
+    if (browser) {
+        await browser.close();
+    }
+    process.exit(0);
 });
 
 const port = process.env.PORT || 3000;
