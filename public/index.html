@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WhatsApp AI Bot</title>
     <link rel="stylesheet" href="style.css">
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -43,7 +43,12 @@
     </div>
 
     <script>
-        const socket = io();
+        // Initialize socket with the current host
+        const socket = io(window.location.origin, {
+            path: '/socket.io',
+            transports: ['websocket', 'polling']
+        });
+        
         const status = document.getElementById('status');
         const qrCode = document.getElementById('qrcode');
         const spinner = document.getElementById('loading-spinner');
@@ -56,12 +61,23 @@
             status.className = `status ${isError ? 'error' : ''}`;
         }
 
+        // Socket connection event
         socket.on('connect', () => {
+            console.log('Connected to server');
             connectionStatus.textContent = 'Connected to server';
             updateStatus('Initializing WhatsApp...');
         });
 
+        // Socket error event
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            updateStatus('Connection error. Please refresh the page.', true);
+            connectionStatus.textContent = 'Connection Failed';
+        });
+
+        // Socket disconnect event
         socket.on('disconnect', () => {
+            console.log('Disconnected from server');
             connectionStatus.textContent = 'Disconnected';
             updateStatus('Connection lost. Please refresh the page.', true);
             qrContainer.style.display = 'block';
@@ -70,7 +86,9 @@
             spinner.style.display = 'block';
         });
 
+        // QR Code event
         socket.on('qr', (qrDataURL) => {
+            console.log('Received QR code');
             updateStatus('Scan QR Code with WhatsApp');
             qrCode.src = qrDataURL;
             qrCode.style.display = 'block';
@@ -79,14 +97,18 @@
             successContainer.style.display = 'none';
         });
 
+        // WhatsApp ready event
         socket.on('whatsappReady', () => {
+            console.log('WhatsApp connected');
             updateStatus('WhatsApp Connected Successfully!');
             connectionStatus.textContent = 'WhatsApp Connected';
             qrContainer.style.display = 'none';
             successContainer.style.display = 'block';
         });
 
+        // Error event
         socket.on('error', (message) => {
+            console.error('Error:', message);
             updateStatus(message, true);
             spinner.style.display = 'none';
         });
